@@ -1,0 +1,45 @@
+// Load dataset ke Neo4j
+LOAD CSV WITH HEADERS FROM 'https://raw.githubusercontent.com/imammansyur/dataset/main/species_export_20211111.csv' AS row
+MERGE (s:Species {speciesId: row.speciesId, name: row.species, speciesYear: row.year})
+MERGE (f:Family {name: row.family})
+MERGE (g:Genus {name: row.genus})
+MERGE (a:Author {name: row.author})
+WITH s, f, g, a, row
+UNWIND split(row.distribution, ', ') as distribution
+MERGE (d:Distribution {name: distribution})
+
+MERGE (s)-[sp:IS_SPECIES_OF]->(g)
+MERGE (g)-[gn:IS_GENUS_OF]->(f)
+MERGE (s)-[do:DITEMUKAN_OLEH]->(a)
+MERGE (s)-[dd:DITEMUKAN_DI]->(d)
+
+// Membuat graph persebaran spesies
+
+CALL gds.graph.create(
+  'speciesDistribution',                     
+  ['Species', 'Distribution'],                       
+  'DITEMUKAN_DI'
+)
+YIELD
+  graphName AS graph,
+  relationshipProjection AS deskripsiRelationship,
+  nodeCount AS nodes,
+  relationshipCount AS relCount
+
+// Membuat algoritma label propagation
+
+CALL gds.labelPropagation.stream('speciesDistribution')
+YIELD nodeId, communityId AS Community
+RETURN gds.util.asNode(nodeId).name AS Name, Community
+ORDER BY Community, Name
+
+// Write property 'community'
+
+CALL gds.labelPropagation.write('speciesDistribution', { writeProperty: 'community' })
+YIELD communityCount, ranIterations, didConverge
+
+// Menampilkan jumlah spesies dalam satu komunitas
+
+MATCH (s:Species)-[:DITEMUKAN_DI]-(d:Distribution)
+RETURN d.name as nama_negara, d.community as no_komunitas, COUNT(s.community) as anggota
+ORDER BY anggota desc
